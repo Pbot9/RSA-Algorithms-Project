@@ -1,164 +1,239 @@
-## import random
+#!/usr/bin/env python3
+"""
+RSA prototype with p and q ~= 256 bits (n ~= 512 bits).
+Owner "Show the keys" prints the full key material (p, q, phi, e, d, n).
+"""
+import secrets
+import time
 from math import gcd
 from sympy import isprime, mod_inverse
 
-# ===================== Key Generation =====================
+# ------------------- CONFIGURATION -------------------
+PRIME_BITS = 256         # bits for each prime p and q
+DEFAULT_E = 65537        # common public exponent
+SMALL_PRIMES = (3,5,7,11,13,17,19,23,29,31,37,41,43,47)
+# -----------------------------------------------------
 
-def generate_prime_near_million():
-    """Generate a random prime around 1,000,000."""
+def generate_large_prime(bits: int) -> int:
+    """Generate a probable prime of approximately `bits` bits using secure randomness."""
+    assert bits >= 3
+    tries = 0
+    start = time.time()
     while True:
-        num = random.randint(900_000, 1_100_000)
-        if isprime(num):
-            return num
+        tries += 1
+        candidate = secrets.randbits(bits)
+        candidate |= (1 << (bits - 1))  # ensure highest bit set -> correct bit length
+        candidate |= 1  # ensure odd
 
-def generate_keys():
-    """Generate RSA public and private keys with p, q ~ 1,000,000."""
-    p = generate_prime_near_million()
-    q = generate_prime_near_million()
+        # quick small-prime filter
+        if any(candidate % p == 0 for p in SMALL_PRIMES):
+            continue
+
+        if isprime(candidate):
+            elapsed = time.time() - start
+            # minimal progress message
+            print(f"  Found {bits}-bit prime after {tries} tries ({elapsed:.2f}s).")
+            return candidate
+
+def generate_keys(prime_bits: int = PRIME_BITS, e: int = DEFAULT_E):
+    """Generate RSA keys: returns (public_key, private_key, meta)."""
+    print(f"Generating two ~{prime_bits}-bit primes (this may take a few seconds)...")
+    t0 = time.time()
+
+    p = generate_large_prime(prime_bits)
+    q = generate_large_prime(prime_bits)
     while q == p:
-        q = generate_prime_near_million()
+        print("  Collision detected (very unlikely). Regenerating q...")
+        q = generate_large_prime(prime_bits)
 
     n = p * q
     phi = (p - 1) * (q - 1)
 
-    e = 65537
+    # choose e, fallback if needed
     if gcd(e, phi) != 1:
-        for cand in range(3, phi, 2):
+        print(f"Default e={e} not coprime with phi; searching fallback e...")
+        found = False
+        for cand in (3,5,17,257,65537):
             if gcd(cand, phi) == 1:
                 e = cand
+                found = True
+                print(f"  Using fallback e = {e}")
                 break
+        if not found:
+            # brute force fallback (very rare)
+            for cand in range(3, 1 << 16, 2):
+                if gcd(cand, phi) == 1:
+                    e = cand
+                    found = True
+                    print(f"  Selected e = {e} after search")
+                    break
+            if not found:
+                raise RuntimeError("Unable to find suitable public exponent e.")
 
     d = mod_inverse(e, phi)
 
-    return (e, n), (d, n)
+    total = time.time() - t0
+    meta = {
+        "p": p,
+        "q": q,
+        "phi": phi,
+        "p_bits": p.bit_length(),
+        "q_bits": q.bit_length(),
+        "n_bits": n.bit_length(),
+        "gen_seconds": total
+    }
+    public_key = (e, n)
+    private_key = (d, n)
 
+    print(f"Key generation finished in {total:.2f}s. n is {n.bit_length()} bits.")
+    return public_key, private_key, meta
 
-# ===================== Core RSA Functions =====================
+# ------------------- RSA operations (educational per-character mode) -------------------
 
 def encrypt(message: str, public_key):
-    """Encrypt a string message with the public key."""
     e, n = public_key
-    cipher = [pow(ord(ch), e, n) for ch in message]
-    return cipher
+    return [pow(ord(ch), e, n) for ch in message]
 
 def decrypt(ciphertext, private_key):
-    """Decrypt a list of integers with the private key."""
     d, n = private_key
-    msg = ''.join(chr(pow(c, d, n)) for c in ciphertext)
-    return msg
+    return ''.join(chr(pow(c, d, n)) for c in ciphertext)
 
 def sign(message: str, private_key):
-    """Sign a message using the private key."""
     d, n = private_key
-    signature = [pow(ord(ch), d, n) for ch in message]
-    return signature
+    return [pow(ord(ch), d, n) for ch in message]
 
 def verify(message: str, signature, public_key):
-    """Verify a signature using the public key."""
     e, n = public_key
-    check = ''.join(chr(pow(s, e, n)) for s in signature)
-    return check == message
+    recovered = ''.join(chr(pow(s, e, n)) for s in signature)
+    return recovered == message
 
-
-# ===================== Menu System =====================
+# ------------------- Interactive menu -------------------
 
 def main():
-    # Store global state
-    public_key, private_key = generate_keys()
-    messages = []      # encrypted messages
-    signatures = []    # signed messages
+    # initial key generation
+    public_key, private_key, meta = generate_keys(prime_bits=PRIME_BITS, e=DEFAULT_E)
 
-    print("RSA keys have been generated.")
+    messages = []    # list of ciphertexts (lists of ints)
+    signatures = []  # list of signatures (lists of ints)
+
+    print("\nRSA keys have been generated.")
+    print(f"  p bits: {meta['p_bits']}, q bits: {meta['q_bits']}, n bits: {meta['n_bits']}")
 
     while True:
         print("\nPlease select your user type:")
         print("1. A public user")
         print("2. The owner of the keys")
         print("3. Exit program")
-        choice = input("Enter your choice: ")
+        choice = input("Enter your choice: ").strip()
 
-        if choice == "1":  # Public User
+        if choice == "1":
+            # Public user menu
             while True:
                 print("\nAs a public user, what would you like to do?")
                 print("1. Send an encrypted message")
                 print("2. Authenticate a digital signature")
                 print("3. Exit")
-                subchoice = input("Enter your choice: ")
+                sub = input("Enter your choice: ").strip()
 
-                if subchoice == "1":
+                if sub == "1":
                     msg = input("Enter a message: ")
                     cipher = encrypt(msg, public_key)
                     messages.append(cipher)
                     print("Message encrypted and sent.")
 
-                elif subchoice == "2":
+                elif sub == "2":
                     if not signatures:
                         print("There are no signature to authenticate.")
                     else:
                         print("The following messages are available:")
                         for i, sig in enumerate(signatures):
-                            # show original signed message text
-                            text = ''.join(chr(pow(s, public_key[0], public_key[1])) for s in sig)
-                            print(f"{i+1}. {text}")
-                        idx = int(input("Enter your choice: ")) - 1
-                        msg = ''.join(chr(pow(s, public_key[0], public_key[1])) for s in signatures[idx])
-                        if verify(msg, signatures[idx], public_key):
+                            shown = ''.join(chr(pow(s, public_key[0], public_key[1])) for s in sig)
+                            print(f"{i+1}. {shown}")
+                        idx = input("Enter your choice: ").strip()
+                        if not idx.isdigit():
+                            print("Invalid choice.")
+                            continue
+                        idx = int(idx) - 1
+                        if idx < 0 or idx >= len(signatures):
+                            print("Invalid choice.")
+                            continue
+                        signed_text = ''.join(chr(pow(s, public_key[0], public_key[1])) for s in signatures[idx])
+                        if verify(signed_text, signatures[idx], public_key):
                             print("Signature is valid.")
                         else:
                             print("Signature is invalid.")
 
-                elif subchoice == "3":
+                elif sub == "3":
                     break
                 else:
-                    print("Invalid choice.")
+                    print("Invalid choice. Enter 1, 2, or 3.")
 
-        elif choice == "2":  # Key Owner
+        elif choice == "2":
+            # Owner menu
             while True:
                 print("\nAs the owner of the keys, what would you like to do?")
                 print("1. Decrypt a received message")
                 print("2. Digitally sign a message")
-                print("3. Show the keys")
+                print("3. Show the keys (FULL key material)")
                 print("4. Generating a new set of the keys")
                 print("5. Exit")
-                subchoice = input("Enter your choice: ")
+                sub = input("Enter your choice: ").strip()
 
-                if subchoice == "1":
+                if sub == "1":
                     if not messages:
                         print("No encrypted messages available.")
                     else:
                         print("The following messages are available:")
-                        for i, m in enumerate(messages):
-                            print(f"{i+1}. (length = {len(m)})")
-                        idx = int(input("Enter your choice: ")) - 1
+                        for i, c in enumerate(messages):
+                            print(f"{i+1}. (length = {len(c)})")
+                        idx = input("Enter your choice: ").strip()
+                        if not idx.isdigit():
+                            print("Invalid choice.")
+                            continue
+                        idx = int(idx) - 1
+                        if idx < 0 or idx >= len(messages):
+                            print("Invalid choice.")
+                            continue
                         plain = decrypt(messages[idx], private_key)
                         print(f"Decrypted message: {plain.upper()}")
 
-                elif subchoice == "2":
+                elif sub == "2":
                     msg = input("Enter a message: ")
                     sig = sign(msg, private_key)
                     signatures.append(sig)
                     print("Message signed and sent.")
 
-                elif subchoice == "3":
-                    print(f"Public Key: {public_key}")
-                    print(f"Private Key: {private_key}")
+                elif sub == "3":
+                    # Show full key material (p, q, phi, e, d, n)
+                    p = meta['p']
+                    q = meta['q']
+                    phi = meta['phi']
+                    e, n = public_key
+                    d, _ = private_key
+                    print("\n----- FULL KEY MATERIAL (OWNER) -----")
+                    print(f"p ({p.bit_length()} bits) =\n{p}\n")
+                    print(f"q ({q.bit_length()} bits) =\n{q}\n")
+                    print(f"phi({n}) =\n{phi}\n")
+                    print(f"e = {e}")
+                    print(f"d ({d.bit_length()} bits) =\n{d}\n")
+                    print(f"n ({n.bit_length()} bits) =\n{n}")
+                    print("----- END KEY MATERIAL -----")
 
-                elif subchoice == "4":
-                    public_key, private_key = generate_keys()
+                elif sub == "4":
+                    public_key, private_key, meta = generate_keys(prime_bits=PRIME_BITS, e=DEFAULT_E)
                     print("New RSA keys have been generated.")
+                    print(f"  p bits: {meta['p_bits']}, q bits: {meta['q_bits']}, n bits: {meta['n_bits']}")
 
-                elif subchoice == "5":
+                elif sub == "5":
                     break
                 else:
-                    print("Invalid choice.")
+                    print("Invalid choice. Enter 1-5.")
 
         elif choice == "3":
             print("Bye for now!")
             break
-
         else:
-            print("Invalid choice.")
+            print("Invalid choice. Enter 1, 2, or 3.")
 
-# ===================== Run =====================
 if __name__ == "__main__":
     main()
