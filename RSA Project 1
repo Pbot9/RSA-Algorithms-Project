@@ -1,0 +1,28 @@
+""
+RSA Project 1
+Larry, London, Ryan
+Due 9/18/25
+""
+##prime number test (not fermats)
+def testPrime_brute_force(p = 10):
+  if p = 2:
+    return True
+  else:
+    for b in range(2, math.floor(math.sqrt(p))):
+      if math.gcd(p, b) > 1:
+        return False
+      else:
+        continue
+    return True
+
+#prime number fermat;'s test
+def fermat_test(n, k):
+    if n == 2:
+        return True
+    if n % 2 == 0:
+        return False
+    for i in xrange(k):
+        a = random.randint(1, n-1)
+        if pow(a, n-1) % n != 1:
+            return False
+    return True
