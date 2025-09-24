@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+"""
+sorting_benchmark.py
+
+Benchmark suite for sorting algorithms for CSCI 3330 Project 2.
+Implements:
+ - Bubble Sort
+ - Merge Sort
+ - Quick Sort (first-element pivot)
+ - Insertion Sort
+
+Generates inputs for:
+ - Best case: sorted ascending
+ - Average case: random arrays
+ - Worst case: reverse-sorted
+
+Writes raw timing results to results_raw.csv and an aggregated results_summary.csv.
+
+"""
+
+import argparse
+import csv
+import random
+import time
+import sys
+from typing import List, Callable, Tuple
+import statistics
+
+# -------------------------
+# Sorting algorithm impls
+# -------------------------
+
+def bubble_sort(arr: List[int]) -> List[int]:
+    a = arr[:]
+    n = len(a)
+    for i in range(n):
+        swapped = False
+        for j in range(0, n - 1 - i):
+            if a[j] > a[j + 1]:
+                a[j], a[j + 1] = a[j + 1], a[j]
+                swapped = True
+        if not swapped:
+            break
+    return a
+
+def merge_sort(arr: List[int]) -> List[int]:
+    if len(arr) <= 1:
+        return arr[:]
+    mid = len(arr) // 2
+    left = merge_sort(arr[:mid])
+    right = merge_sort(arr[mid:])
+    return _merge(left, right)
+
+def _merge(left: List[int], right: List[int]) -> List[int]:
+    i = j = 0
+    out = []
+    while i < len(left) and j < len(right):
+        if left[i] <= right[j]:
+            out.append(left[i])
+            i += 1
+        else:
+            out.append(right[j])
+            j += 1
+    out.extend(left[i:])
+    out.extend(right[j:])
+    return out
+
+def quick_sort_first_pivot(arr: List[int]) -> List[int]:
+    if len(arr) <= 1:
+        return arr[:]
+    a = arr[:]
+    pivot = a[0]
+    left = [x for x in a[1:] if x <= pivot]
+    right = [x for x in a[1:] if x > pivot]
+    return quick_sort_first_pivot(left) + [pivot] + quick_sort_first_pivot(right)
+
+def insertion_sort(arr: List[int]) -> List[int]:
+    a = arr[:]
+    for i in range(1, len(a)):
+        key = a[i]
+        j = i - 1
+        while j >= 0 and a[j] > key:
+            a[j + 1] = a[j]
+            j -= 1
+        a[j + 1] = key
+    return a
+
+# Map names to functions
+ALGS = {
+    "bubble": bubble_sort,
+    "merge": merge_sort,
+    "quick": quick_sort_first_pivot,
+    "insertion": insertion_sort
+}
+
+# -------------------------
+# Input generators
+# -------------------------
+
+def generate_sorted(n: int) -> List[int]:
+    return list(range(n))
+
+def generate_reverse(n: int) -> List[int]:
+    return list(range(n, 0, -1))
+
+def generate_random(n: int, value_range: Tuple[int,int]=(0,10**9)) -> List[int]:
+    lo, hi = value_range
+    return [random.randint(lo, hi) for _ in range(n)]
+
+def balanced_input_for_first_pivot(n: int) -> List[int]:
+    sorted_list = list(range(n))
+    def medians(seq):
+        if not seq:
+            return []
+        mid = len(seq) // 2
+        return [seq[mid]] + medians(seq[:mid]) + medians(seq[mid+1:])
+    return medians(sorted_list)
+
+# -------------------------
+# Timing wrapper
+# -------------------------
+
+def time_sort(func: Callable[[List[int]], List[int]], arr: List[int]) -> float:
+    to_sort = arr[:]
+    t0 = time.perf_counter()
+    _ = func(to_sort)
+    t1 = time.perf_counter()
+    return t1 - t0
+
+# -------------------------
+# CSV output helpers
+# -------------------------
+
+RAW_CSV = "results_raw.csv"
+SUMMARY_CSV = "results_summary.csv"
+
+def write_raw_rows(rows):
+    header = ["algorithm","case","n","repeat","time_seconds"]
+    with open(RAW_CSV, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(header)
+        for r in rows:
+            w.writerow(r)
+
+def write_summary(rows):
+    header = ["algorithm","case","n","mean_time","median_time","stdev_time","runs"]
+    with open(SUMMARY_CSV, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(header)
+        for alg, case, n, times in rows:
+            mean_t = statistics.mean(times) if times else None
+            median_t = statistics.median(times) if times else None
+            stdev_t = statistics.stdev(times) if len(times) >= 2 else 0.0
+            w.writerow([alg, case, n, mean_t, median_t, stdev_t, len(times)])
+
+# -------------------------
+# Experiment runner
+# -------------------------
+
+def run_experiment(algorithm: str, case_type: str, sizes: List[int], repeats: int = 3, rng_seed: int = None) -> None:
+    if algorithm not in ALGS:
+        raise ValueError("Unknown algorithm: " + str(algorithm))
+    func = ALGS[algorithm]
+
+    if rng_seed is not None:
+        random.seed(rng_seed)
+
+    raw_rows = []
+    summary_rows = []
+
+    print(f"Running {algorithm} - {case_type} for sizes: {sizes} (repeats={repeats})")
+    for n in sizes:
+        times = []
+        for r in range(repeats):
+            if case_type == "best":
+                if algorithm == "quick":
+                    arr = balanced_input_for_first_pivot(n)
+                else:
+                    arr = generate_sorted(n)
+            elif case_type == "worst":
+                arr = generate_reverse(n)
+            elif case_type == "average":
+                arr = generate_random(n)
+            else:
+                raise ValueError("Unknown case type: " + case_type)
+
+            try:
+                elapsed = time_sort(func, arr)
+            except RecursionError:
+                print(f"RecursionError at n={n} with {algorithm}")
+                elapsed = float("nan")
+            times.append(elapsed)
+            raw_rows.append((algorithm, case_type, n, r+1, elapsed))
+            print(f"  n={n:8d} run={r+1}/{repeats} time={elapsed:.6f} s")
+
+        summary_rows.append((algorithm, case_type, n, times))
+
+    write_raw_rows(raw_rows)
+    write_summary(summary_rows)
+    print(f"Done. Raw results -> {RAW_CSV}, Summary -> {SUMMARY_CSV}")
+
+# -------------------------
+# Interactive menu
+# -------------------------
+
+def interactive_menu():
+    print("Welcome to the sorting benchmark suite!")
+    while True:
+        print("\nSelect the sorting algorithm you want to test.")
+        print("-------------------------")
+        print("1. Bubble Sort")
+        print("2. Merge Sort")
+        print("3. Quick Sort (first-element pivot)")
+        print("4. Insertion Sort")
+        print("5. Exit")
+        choice = input("Select a sorting algorithm (1-5): ").strip()
+        mapping = {"1":"bubble","2":"merge","3":"quick","4":"insertion","5":"exit"}
+        if choice not in mapping:
+            print("Invalid choice.")
+            continue
+        if mapping[choice] == "exit":
+            print("Bye!")
+            break
+        alg = mapping[choice]
+        while True:
+            print(f"\nCase Scenarios for {alg} ---------------")
+            print("1. Best Case")
+            print("2. Average Case")
+            print("3. Worst Case")
+            print("4. Back")
+            c = input(f"{alg} test Select the case (1-4): ").strip()
+            cmapping = {"1":"best","2":"average","3":"worst","4":"back"}
+            if c not in cmapping:
+                print("Invalid choice.")
+                continue
+            if cmapping[c] == "back":
+                break
+            case_type = cmapping[c]
+
+            sline = input("What sizes (N)? ").strip()
+            try:
+                sizes = [int(x) for x in sline.split()]
+                if not sizes:
+                    raise ValueError()
+            except ValueError:
+                print("Invalid sizes input.")
+                continue
+
+            rep_line = input("Repeats per N (default 3): ").strip()
+            repeats = int(rep_line) if rep_line else 3
+
+            run_experiment(alg, case_type, sizes, repeats)
+
+# -------------------------
+# Main
+# -------------------------
+
+def main():
+    interactive_menu()
+
+if __name__ == "__main__":
+    main()
