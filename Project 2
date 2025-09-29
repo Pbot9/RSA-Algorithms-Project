@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 sorting_test.py
 
@@ -10,10 +9,6 @@ Due 9/28/25
 
 import random
 import time
-
-# -------------------------
-# Sorting algorithms
-# -------------------------
 
 def bubbleSort_(myList):  # Bubble Sort Algorithm
     done = False
@@ -78,9 +73,6 @@ def insertionSort_(myList):  # Insertion Sort Algorithm
         myList[j + 1] = key
     return myList
 
-# -------------------------
-# Input generators
-# -------------------------
 
 def generate_sorted(n):
     return list(range(n))
@@ -91,9 +83,6 @@ def generate_reverse(n):
 def generate_random(n):
     return random.sample(range(10 * n), n)
 
-# -------------------------
-# Timing function
-# -------------------------
 
 def time_sort(func, arr):
     start = time.perf_counter()
@@ -101,9 +90,7 @@ def time_sort(func, arr):
     end = time.perf_counter()
     return end - start
 
-# -------------------------
-# Experiment runner
-# -------------------------
+
 
 def run_case(algorithm, case_type):
     algos = {
@@ -145,9 +132,6 @@ def run_case(algorithm, case_type):
         else:
             break
 
-# -------------------------
-# Interactive menu
-# -------------------------
 
 def interactive_menu():
     print("Welcome to the test suite of selected sorting algorithms!")
@@ -188,9 +172,6 @@ def interactive_menu():
 
             run_case(alg, cmapping[c])
 
-# -------------------------
-# Main
-# -------------------------
 
 def main():
     interactive_menu()
